@@ -52,10 +52,10 @@ class Ec2InstanceScenario:
         :param eip_wrapper: An object that wraps Elastic IP actions.
         :param ssm_client: A Boto3 AWS Systems Manager client.
         """
-        self.inst_wrapper = inst_wrapper
-        self.key_wrapper = key_wrapper
-        self.sg_wrapper = sg_wrapper
-        self.eip_wrapper = eip_wrapper
+        self.inst_wrapper = InstanceWrapper(boto3.client("ec2"))
+        self.key_wrapper = KeyPairWrapper(boto3.client("ec2"))
+        self.sg_wrapper = SecurityGroupWrapper(boto3.client("ec2"))
+        self.eip_wrapper = ElasticIpWrapper(boto3.client("ec2"))
         self.ssm_client = ssm_client
 
     @demo_func
@@ -83,7 +83,7 @@ class Ec2InstanceScenario:
         """
         1. Creates a security group for the default VPC.
         2. Adds an inbound rule to allow SSH. The SSH rule allows only
-           inbound traffic from the current computer’s public IPv4 address.
+           inbound traffic from the current computer's public IPv4 address.
         3. Displays information about the security group.
 
         This function uses 'http://checkip.amazonaws.com' to get the current public IP
@@ -285,10 +285,10 @@ class Ec2InstanceScenario:
 if __name__ == "__main__":
     try:
         scenario = Ec2InstanceScenario(
-            InstanceWrapper.from_resource(),
-            KeyPairWrapper.from_resource(),
-            SecurityGroupWrapper.from_resource(),
-            ElasticIpWrapper.from_resource(),
+            InstanceWrapper(boto3.client("ec2")),
+            KeyPairWrapper(boto3.client("ec2")),
+            SecurityGroupWrapper(boto3.client("ec2")),
+            ElasticIpWrapper(boto3.client("ec2")),
             boto3.client("ssm"),
         )
         scenario.run_scenario()

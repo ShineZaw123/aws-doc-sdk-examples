@@ -1,37 +1,26 @@
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 import logging
-import boto3
 from botocore.exceptions import ClientError
 
 logger = logging.getLogger(__name__)
 
-
-# snippet-start:[python.example_code.ec2.InstanceWrapper.class]
-# snippet-start:[python.example_code.ec2.InstanceWrapper.decl]
 class InstanceWrapper:
     """Encapsulates Amazon Elastic Compute Cloud (Amazon EC2) instance actions."""
 
-    def __init__(self, ec2_resource, instance=None):
+    def __init__(self, ec2_client, instance=None):
         """
-        :param ec2_resource: A Boto3 Amazon EC2 resource. This high-level resource
-                             is used to create additional high-level objects
-                             that wrap low-level Amazon EC2 service actions.
+        :param ec2_client: A Boto3 Amazon EC2 client. This low-level client
+                           is used to perform EC2 service actions.
         :param instance: A Boto3 Instance object. This is a high-level object that
-                           wraps instance actions.
+                         wraps instance actions.
         """
-        self.ec2_resource = ec2_resource
+        self.ec2_client = ec2_client
         self.instance = instance
 
     @classmethod
-    def from_resource(cls):
-        ec2_resource = boto3.resource("ec2")
-        return cls(ec2_resource)
+    def from_client(cls):
+        ec2_client = boto3.client("ec2")
+        return cls(ec2_client)
 
-    # snippet-end:[python.example_code.ec2.InstanceWrapper.decl]
-
-    # snippet-start:[python.example_code.ec2.RunInstances]
     def create(self, image, instance_type, key_pair, security_groups=None):
         """
         Creates a new EC2 instance. The instance starts immediately after
@@ -62,10 +51,10 @@ class InstanceWrapper:
             }
             if security_groups is not None:
                 instance_params["SecurityGroupIds"] = [sg.id for sg in security_groups]
-            self.instance = self.ec2_resource.create_instances(
-                **instance_params, MinCount=1, MaxCount=1
-            )[0]
-            self.instance.wait_until_running()
+            response = self.ec2_client.run_instances(**instance_params, MinCount=1, MaxCount=1)
+            self.instance = response["Instances"][0]
+            waiter = self.ec2_client.get_waiter("instance_running")
+            waiter.wait(InstanceIds=[self.instance["InstanceId"]])
         except ClientError as err:
             logging.error(
                 "Couldn't create instance with image %s, instance type %s, and key %s. "
@@ -80,9 +69,6 @@ class InstanceWrapper:
         else:
             return self.instance
 
-    # snippet-end:[python.example_code.ec2.RunInstances]
-
-    # snippet-start:[python.example_code.ec2.DescribeInstances]
     def display(self, indent=1):
         """
         Displays information about an instance.
@@ -94,15 +80,16 @@ class InstanceWrapper:
             return
 
         try:
-            self.instance.load()
+            response = self.ec2_client.describe_instances(InstanceIds=[self.instance["InstanceId"]])
+            instance = response["Reservations"][0]["Instances"][0]
             ind = "\t" * indent
-            print(f"{ind}ID: {self.instance.id}")
-            print(f"{ind}Image ID: {self.instance.image_id}")
-            print(f"{ind}Instance type: {self.instance.instance_type}")
-            print(f"{ind}Key name: {self.instance.key_name}")
-            print(f"{ind}VPC ID: {self.instance.vpc_id}")
-            print(f"{ind}Public IP: {self.instance.public_ip_address}")
-            print(f"{ind}State: {self.instance.state['Name']}")
+            print(f"{ind}ID: {instance['InstanceId']}")
+            print(f"{ind}Image ID: {instance['ImageId']}")
+            print(f"{ind}Instance type: {instance['InstanceType']}")
+            print(f"{ind}Key name: {instance['KeyName']}")
+            print(f"{ind}VPC ID: {instance['VpcId']}")
+            print(f"{ind}Public IP: {instance.get('PublicIpAddress', 'none')}")
+            print(f"{ind}State: {instance['State']['Name']}")
         except ClientError as err:
             logger.error(
                 "Couldn't display your instance. Here's why: %s: %s",
@@ -111,9 +98,6 @@ class InstanceWrapper:
             )
             raise
 
-    # snippet-end:[python.example_code.ec2.DescribeInstances]
-
-    # snippet-start:[python.example_code.ec2.TerminateInstances]
     def terminate(self):
         """
         Terminates an instance and waits for it to be in a terminated state.
@@ -122,10 +106,11 @@ class InstanceWrapper:
             logger.info("No instance to terminate.")
             return
 
-        instance_id = self.instance.id
+        instance_id = self.instance["InstanceId"]
         try:
-            self.instance.terminate()
-            self.instance.wait_until_terminated()
+            self.ec2_client.terminate_instances(InstanceIds=[instance_id])
+            waiter = self.ec2_client.get_waiter("instance_terminated")
+            waiter.wait(InstanceIds=[instance_id])
             self.instance = None
         except ClientError as err:
             logging.error(
@@ -136,9 +121,6 @@ class InstanceWrapper:
             )
             raise
 
-    # snippet-end:[python.example_code.ec2.TerminateInstances]
-
-    # snippet-start:[python.example_code.ec2.StartInstances]
     def start(self):
         """
         Starts an instance and waits for it to be in a running state.
@@ -150,12 +132,13 @@ class InstanceWrapper:
             return
 
         try:
-            response = self.instance.start()
-            self.instance.wait_until_running()
+            response = self.ec2_client.start_instances(InstanceIds=[self.instance["InstanceId"]])
+            waiter = self.ec2_client.get_waiter("instance_running")
+            waiter.wait(InstanceIds=[self.instance["InstanceId"]])
         except ClientError as err:
             logger.error(
                 "Couldn't start instance %s. Here's why: %s: %s",
-                self.instance.id,
+                self.instance["InstanceId"],
                 err.response["Error"]["Code"],
                 err.response["Error"]["Message"],
             )
@@ -163,9 +146,6 @@ class InstanceWrapper:
         else:
             return response
 
-    # snippet-end:[python.example_code.ec2.StartInstances]
-
-    # snippet-start:[python.example_code.ec2.StopInstances]
     def stop(self):
         """
         Stops an instance and waits for it to be in a stopped state.
@@ -177,12 +157,13 @@ class InstanceWrapper:
             return
 
         try:
-            response = self.instance.stop()
-            self.instance.wait_until_stopped()
+            response = self.ec2_client.stop_instances(InstanceIds=[self.instance["InstanceId"]])
+            waiter = self.ec2_client.get_waiter("instance_stopped")
+            waiter.wait(InstanceIds=[self.instance["InstanceId"]])
         except ClientError as err:
             logger.error(
                 "Couldn't stop instance %s. Here's why: %s: %s",
-                self.instance.id,
+                self.instance["InstanceId"],
                 err.response["Error"]["Code"],
                 err.response["Error"]["Message"],
             )
@@ -190,9 +171,6 @@ class InstanceWrapper:
         else:
             return response
 
-    # snippet-end:[python.example_code.ec2.StopInstances]
-
-    # snippet-start:[python.example_code.ec2.DescribeImages]
     def get_images(self, image_ids):
         """
         Gets information about Amazon Machine Images (AMIs) from a list of AMI IDs.
@@ -201,7 +179,8 @@ class InstanceWrapper:
         :return: A list of Boto3 Image objects that represent the requested AMIs.
         """
         try:
-            images = list(self.ec2_resource.images.filter(ImageIds=image_ids))
+            response = self.ec2_client.describe_images(ImageIds=image_ids)
+            images = [self.ec2_client.Image(image_id) for image_id in image_ids]
         except ClientError as err:
             logger.error(
                 "Couldn't get images. Here's why: %s: %s",
@@ -212,9 +191,6 @@ class InstanceWrapper:
         else:
             return images
 
-    # snippet-end:[python.example_code.ec2.DescribeImages]
-
-    # snippet-start:[python.example_code.ec2.DescribeInstanceTypes]
     def get_instance_types(self, architecture):
         """
         Gets instance types that support the specified architecture and are designated
@@ -228,10 +204,8 @@ class InstanceWrapper:
         """
         try:
             inst_types = []
-            it_paginator = self.ec2_resource.meta.client.get_paginator(
-                "describe_instance_types"
-            )
-            for page in it_paginator.paginate(
+            paginator = self.ec2_client.get_paginator("describe_instance_types")
+            for page in paginator.paginate(
                 Filters=[
                     {
                         "Name": "processor-info.supported-architecture",
@@ -250,8 +224,3 @@ class InstanceWrapper:
             raise
         else:
             return inst_types
-
-    # snippet-end:[python.example_code.ec2.DescribeInstanceTypes]
-
-
-# snippet-end:[python.example_code.ec2.InstanceWrapper.class]
