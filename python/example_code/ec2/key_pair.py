@@ -12,17 +12,14 @@ logger = logging.getLogger(__name__)
 class KeyPairWrapper:
     """Encapsulates Amazon Elastic Compute Cloud (Amazon EC2) key pair actions using the client interface."""
 
-    def __init__(self, ec2_client, key_file_dir, key_pair=None):
+    def __init__(self, ec2_client, key_file_dir):
         """
         :param ec2_client: A Boto3 Amazon EC2 client. This client provides low-level 
                            access to AWS EC2 services.
         :param key_file_dir: The folder where the private key information is stored.
                              This should be a secure folder.
-        :param key_pair: A Boto3 KeyPairResult object. This is a low-level object that
-                         wraps key pair actions.
         """
         self.ec2_client = ec2_client
-        self.key_pair = key_pair
         self.key_file_path = None
         self.key_file_dir = key_file_dir
 
@@ -41,16 +38,15 @@ class KeyPairWrapper:
         again. The private key data is stored as a .pem file.
 
         :param key_name: The name of the key pair to create.
-        :return: A Boto3 KeyPairResult object that represents the newly created key pair.
+        :return: The private key material of the newly created key pair.
         """
         try:
             response = self.ec2_client.create_key_pair(KeyName=key_name)
-            self.key_pair = response
             self.key_file_path = os.path.join(
-                self.key_file_dir.name, f"{self.key_pair['KeyName']}.pem"
+                self.key_file_dir.name, f"{response['KeyName']}.pem"
             )
             with open(self.key_file_path, "w") as key_file:
-                key_file.write(self.key_pair['KeyMaterial'])
+                key_file.write(response['KeyMaterial'])
         except ClientError as err:
             logger.error(
                 "Couldn't create key %s. Here's why: %s: %s",
@@ -60,7 +56,7 @@ class KeyPairWrapper:
             )
             raise
         else:
-            return self.key_pair
+            return response['KeyMaterial']
 
     # snippet-end:[python.example_code.ec2.CreateKeyPair]
 
