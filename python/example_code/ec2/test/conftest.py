@@ -1,62 +1,59 @@
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-# SPDX-License-Identifier: Apache-2.0
-
-"""
-Contains common test fixtures used to run unit tests.
-"""
-
-import sys
-from unittest.mock import MagicMock
+import logging
 import boto3
-import pytest
+from botocore.exceptions import ClientError
 
-from elastic_ip import ElasticIpWrapper
-from instance import InstanceWrapper
-from key_pair import KeyPairWrapper
-from security_group import SecurityGroupWrapper
-import scenario_get_started_instances
+logger = logging.getLogger(__name__)
 
-# This is needed so Python can find test_tools on the path.
-sys.path.append("../..")
-from test_tools.fixtures.common import *
+# snippet-start:[python.example_code.ec2.ElasticIpWrapper.class]
+# snippet-start:[python.example_code.ec2.ElasticIpWrapper.decl]
+class ElasticIpWrapper:
+    """Encapsulates Amazon Elastic Compute Cloud (Amazon EC2) Elastic IP address actions using the client interface."""
 
+    def __init__(self, ec2_client, allocation_id=None):
+        """
+        :param ec2_client: A Boto3 Amazon EC2 client. This client provides low-level 
+                           access to AWS EC2 services.
+        :param allocation_id: The allocation ID of an Elastic IP address.
+        """
+        self.ec2_client = ec2_client
+        self.allocation_id = allocation_id
 
-class ScenarioData:
-    def __init__(self, resource, stubber, ssm_client, ssm_stubber):
-        self.resource = resource
-        self.stubber = stubber
-        self.ssm_client = ssm_client
-        self.ssm_stubber = ssm_stubber
-        self.scenario = scenario_get_started_instances.Ec2InstanceScenario(
-            InstanceWrapper(self.resource),
-            KeyPairWrapper(self.resource, MockDir()),
-            SecurityGroupWrapper(self.resource),
-            ElasticIpWrapper(self.resource),
-            ssm_client,
-        )
+    @classmethod
+    def from_client(cls):
+        ec2_client = boto3.client("ec2")
+        return cls(ec2_client)
 
+    # snippet-end:[python.example_code.ec2.ElasticIpWrapper.decl]
 
-class MockDir:
-    def __init__(self):
-        self.name = ""
+    # snippet-start:[python.example_code.ec2.AllocateAddress]
+    def allocate(self):
+        """
+        Allocates an Elastic IP address that can be associated with an Amazon EC2
+        instance. By using an Elastic IP address, you can keep the public IP address
+        constant even when you restart the associated instance.
 
+        :return: The allocation ID of the newly created Elastic IP address.
+        """
+        try:
+            response = self.ec2_client.allocate_address(Domain="vpc")
+            self.allocation_id = response["AllocationId"]
+        except ClientError as err:
+            # Improved error handling to catch specific errors like InvalidAddress.Unavailable and InvalidInput,
+            # providing more informative error messages for these cases.
+            if err.response["Error"]["Code"] in ["InvalidAddress.Unavailable", "InvalidInput"]:
+                logger.error(
+                    "Couldn't allocate Elastic IP. The requested IP address is not available or the input is invalid."
+                )
+            else:
+                logger.error(
+                    "Couldn't allocate Elastic IP. Here's why: %s: %s",
+                    err.response["Error"]["Code"],
+                    err.response["Error"]["Message"],
+                )
+            raise err
+        else:
+            return self.allocation_id
 
-@pytest.fixture
-def mock_address():
-    return MagicMock(
-        allocation_id="mock-allocation-id",
-        public_ip="1.2.3.4",
-        domain="vpc",
-        association_id="mock-association-id",
-        instance_id="mock-instance-id",
-        network_interface_id="mock-network-interface-id",
-    )
+    # snippet-end:[python.example_code.ec2.AllocateAddress]
 
-
-@pytest.fixture
-def scenario_data(make_stubber):
-    resource = boto3.resource("ec2")
-    stubber = make_stubber(resource.meta.client)
-    ssm_client = boto3.client("ssm")
-    ssm_stubber = make_stubber(ssm_client)
-    return ScenarioData(resource, stubber, ssm_client, ssm_stubber)
+# snippet-end:[python.example_code.ec2.ElasticIpWrapper.class]
